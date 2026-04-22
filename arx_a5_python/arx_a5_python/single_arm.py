@@ -2,7 +2,7 @@ from typing import List, Tuple, Union, Optional, Dict, Any
 import numpy as np
 import os
 import sys
-import arx_r5_python as arx
+import arx_a5 as arx
 
 
 def quaternion_to_euler(quat: np.ndarray) -> Tuple[float, float, float]:
@@ -86,7 +86,7 @@ class SingleArm:
         )
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        urdf_path = os.path.join(current_dir,urdf_name)
+        urdf_path = os.path.join(current_dir, "urdf", urdf_name)
         self.arm = arx.InterfacesPy(urdf_path,config.get("can_port", "can0"))
         self.arm.arx_x(500,2000,10)
 

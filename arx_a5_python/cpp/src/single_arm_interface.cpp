@@ -4,7 +4,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(arx_r5_python, m) {
+PYBIND11_MODULE(arx_a5, m) {
     py::class_<arx::r5::InterfacesPy>(m, "InterfacesPy")
         .def(py::init<std::string,std::string>()) 
         .def("set_joint_positions", &arx::r5::InterfacesPy::set_joint_positions)
