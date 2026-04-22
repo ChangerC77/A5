@@ -1,4 +1,4 @@
-from bimanual import SingleArm
+from arx_a5_python import SingleArm
 from typing import Dict, Any
 import numpy as np
 import time
