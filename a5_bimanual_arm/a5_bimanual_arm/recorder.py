@@ -1,0 +1,271 @@
+import json
+import time
+from collections import deque
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+
+import cv_bridge
+import h5py
+import numpy as np
+from sensor_msgs.msg import Image as RosImage
+
+
+_DEFAULT_CONFIG = {
+    "obs_keys": [
+        {"name": "qpos", "type": "float", "shape": [14]},
+        {"name": "qvel", "type": "float", "shape": [14]},
+        {"name": "images/head", "type": "image"},
+        {"name": "images/left_wrist", "type": "image"},
+        {"name": "images/right_wrist", "type": "image"},
+    ],
+    "action_key": {"name": "actions", "type": "float", "shape": [14]},
+}
+
+_CV_BRIDGE = cv_bridge.CvBridge()
+
+_BGRA_TO_RGB = np.array([2, 1, 0], dtype=np.intp)
+
+
+def _ros_image_to_rgb(msg: RosImage) -> np.ndarray:
+    encoding = msg.encoding
+    if encoding in ("bgr8", "8UC3"):
+        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        return img[:, :, _BGRA_TO_RGB]
+    elif encoding in ("rgb8", "8UC3") and encoding == "rgb8":
+        return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3).copy()
+    elif encoding == "bgra8":
+        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        return img[:, :, _BGRA_TO_RGB]
+    elif encoding == "rgba8":
+        return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)[:, :, :3].copy()
+    elif encoding == "mono8":
+        img = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
+        return np.stack([img, img, img], axis=-1)
+    elif encoding == "mono16":
+        img = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+        img8 = (img >> 8).astype(np.uint8)
+        return np.stack([img8, img8, img8], axis=-1)
+    elif encoding in ("yuv422", "UYVY"):
+        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        return img[:, :, _BGRA_TO_RGB]
+    else:
+        return _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+
+
+class EpisodeRecorder:
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        img_sync_tolerance: float = 0.005,
+        joint_buffer_maxlen: int = 2000,
+    ):
+        if config_path is not None:
+            with open(config_path, "r") as f:
+                self._config = json.load(f)
+        else:
+            self._config = _DEFAULT_CONFIG
+
+        self._img_sync_tolerance = img_sync_tolerance
+        self._joint_buffer_maxlen = joint_buffer_maxlen
+
+        self._obs_keys = self._config["obs_keys"]
+        self._action_key = self._config.get("action_key", None)
+
+        self._float_obs_keys = [k for k in self._obs_keys if k["type"] == "float"]
+        self._image_obs_keys = [k for k in self._obs_keys if k["type"] == "image"]
+
+        self._image_key_names = [k["name"] for k in self._image_obs_keys]
+        self._float_key_names = [k["name"] for k in self._float_obs_keys]
+
+        self._episodes: List[Dict[str, List[np.ndarray]]] = []
+        self._recording = False
+
+        self._joint_ts: deque = deque(maxlen=joint_buffer_maxlen)
+        self._joint_data: Dict[str, deque] = {}
+        self._action_ts: deque = deque(maxlen=joint_buffer_maxlen)
+        self._action_data: deque = deque(maxlen=joint_buffer_maxlen)
+        self._image_ts: Dict[str, deque] = {}
+        self._image_data: Dict[str, deque] = {}
+        self._latest_image_time: Dict[str, float] = {}
+
+        self._current_episode: Dict[str, List[np.ndarray]] = {}
+
+    def start_episode(self) -> None:
+        if self._recording:
+            self.stop_episode()
+
+        self._recording = True
+        self._joint_ts.clear()
+        self._joint_data = {name: deque(maxlen=self._joint_buffer_maxlen) for name in self._float_key_names}
+        self._action_ts.clear()
+        self._action_data.clear()
+        self._image_ts = {name: deque(maxlen=500) for name in self._image_key_names}
+        self._image_data = {name: deque(maxlen=500) for name in self._image_key_names}
+        self._latest_image_time = {}
+
+        self._current_episode = {}
+        self._current_episode["timestamp"] = []
+        for k in self._float_key_names:
+            self._current_episode[f"observations/{k}"] = []
+        for k in self._image_key_names:
+            self._current_episode[f"observations/{k}"] = []
+        if self._action_key is not None:
+            self._current_episode[self._action_key["name"]] = []
+
+    def record_observation(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
+        if not self._recording:
+            return
+        t = time.perf_counter()
+        self._joint_ts.append(t)
+        self._joint_data["qpos"].append(np.asarray(qpos, dtype=np.float64).copy())
+        self._joint_data["qvel"].append(np.asarray(qvel, dtype=np.float64).copy())
+
+    def record_action(self, action: np.ndarray) -> None:
+        if not self._recording or self._action_key is None:
+            return
+        t = time.perf_counter()
+        self._action_ts.append(t)
+        self._action_data.append(np.asarray(action, dtype=np.float64).copy())
+
+    def record_image(self, key: str, image: Union[RosImage, np.ndarray]) -> None:
+        if not self._recording:
+            return
+        if key not in self._image_key_names:
+            return
+        t = time.perf_counter()
+        if isinstance(image, RosImage):
+            rgb = _ros_image_to_rgb(image)
+        else:
+            if image.ndim == 2:
+                rgb = np.stack([image, image, image], axis=-1)
+            elif image.shape[2] == 4:
+                rgb = image[:, :, :3]
+            else:
+                rgb = image
+            rgb = np.asarray(rgb, dtype=np.uint8).copy()
+        self._image_ts[key].append(t)
+        self._image_data[key].append(rgb)
+        self._latest_image_time[key] = t
+
+        if len(self._latest_image_time) == len(self._image_key_names):
+            self._try_sync_frame()
+
+    def _try_sync_frame(self) -> None:
+        times = list(self._latest_image_time.values())
+        t_max = max(times)
+        t_min = min(times)
+        if (t_max - t_min) > self._img_sync_tolerance:
+            return
+
+        if len(self._joint_ts) < 2:
+            return
+
+        t_ref = t_max
+        self._current_episode["timestamp"].append(np.float64(t_ref))
+
+        for key_name in self._float_key_names:
+            interpolated = self._interpolate_joint(t_ref, self._joint_ts, self._joint_data[key_name])
+            if interpolated is None:
+                self._current_episode["timestamp"].pop()
+                return
+            self._current_episode[f"observations/{key_name}"].append(interpolated)
+
+        for key_name in self._image_key_names:
+            if len(self._image_data[key_name]) == 0:
+                self._current_episode["timestamp"].pop()
+                return
+            self._current_episode[f"observations/{key_name}"].append(self._image_data[key_name][-1])
+
+        if self._action_key is not None and len(self._action_ts) >= 2:
+            interpolated = self._interpolate_joint(t_ref, self._action_ts, self._action_data)
+            if interpolated is not None:
+                self._current_episode[self._action_key["name"]].append(interpolated)
+        elif self._action_key is not None and len(self._action_ts) == 1:
+            self._current_episode[self._action_key["name"]].append(self._action_data[0].copy())
+
+        self._latest_image_time.clear()
+
+    @staticmethod
+    def _interpolate_joint(
+        t_ref: float,
+        ts: deque,
+        data: deque,
+    ) -> Optional[np.ndarray]:
+        if len(ts) < 2:
+            if len(ts) == 1:
+                return np.asarray(data[0], dtype=np.float64).copy()
+            return None
+
+        ts_arr = np.array(ts)
+        idx = np.searchsorted(ts_arr, t_ref)
+
+        if idx == 0:
+            return np.asarray(data[0], dtype=np.float64).copy()
+        if idx >= len(ts_arr):
+            return np.asarray(data[-1], dtype=np.float64).copy()
+
+        t0, t1 = ts_arr[idx - 1], ts_arr[idx]
+        d0 = np.asarray(data[idx - 1], dtype=np.float64)
+        d1 = np.asarray(data[idx], dtype=np.float64)
+        alpha = (t_ref - t0) / (t1 - t0) if t1 != t0 else 0.0
+        return d0 + alpha * (d1 - d0)
+
+    def stop_episode(self) -> None:
+        if not self._recording:
+            return
+        self._recording = False
+
+        has_data = any(len(v) > 0 for v in self._current_episode.values())
+        if has_data:
+            self._episodes.append(self._current_episode)
+        self._current_episode = {}
+
+    @property
+    def num_episodes(self) -> int:
+        return len(self._episodes)
+
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
+    def save(self, output_path: str) -> None:
+        if self._recording:
+            self.stop_episode()
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with h5py.File(str(output_path), "w") as f:
+            data_group = f.create_group("data")
+            for i, episode in enumerate(self._episodes):
+                demo_group = data_group.create_group(f"demo_{i}")
+                obs_group = demo_group.create_group("observations")
+
+                for key, values in episode.items():
+                    if not values:
+                        continue
+                    if key == "timestamp":
+                        arr = np.array(values, dtype=np.float64)
+                        demo_group.create_dataset("timestamp", data=arr)
+                        continue
+                    arr = np.stack(values, axis=0)
+                    parts = key.split("/")
+                    if parts[0] == "observations" and len(parts) > 2:
+                        if parts[1] not in obs_group:
+                            img_group = obs_group.create_group(parts[1])
+                        else:
+                            img_group = obs_group[parts[1]]
+                        img_group.create_dataset(parts[2], data=arr, compression="gzip", compression_opts=4)
+                    elif parts[0] == "observations" and len(parts) == 2:
+                        obs_group.create_dataset(parts[1], data=arr)
+                    else:
+                        demo_group.create_dataset(key, data=arr)
+
+            meta_group = f.create_group("meta")
+            meta_group.create_dataset("config", data=json.dumps(self._config))
+            meta_group.create_dataset("num_episodes", data=len(self._episodes))
+
+    @classmethod
+    def load_config_template(cls, output_path: str) -> None:
+        with open(output_path, "w") as f:
+            json.dump(_DEFAULT_CONFIG, f, indent=2)
