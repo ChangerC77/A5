@@ -17,9 +17,6 @@ class BimanualArmControllerNode(Node):
         super().__init__('bimanual_arm_controller')
         self.get_logger().info('BimanualArmController node started.')
         # attr
-        self.img_head_deque = deque()
-        self.img_left_deque = deque()
-        self.img_right_deque = deque()
 
         # declare params
         self.declare_parameter('img_head_topic', '/camera_head/image/compressed')
@@ -58,40 +55,7 @@ class BimanualArmControllerNode(Node):
             self.get_logger().fatal(f'Failed to startup arms: {e}')
             raise
         
-        self._ctrl_running = True
-        self._ctrl_thread = threading.Thread(target=self._control_loop, daemon=True)
-        self._ctrl_thread.start()
 
-    def _control_loop(self):
-        period = 1.0 / 100.0
-        self.get_logger().info('Control loop started at 100Hz.')
-        while self._ctrl_running:
-            t0 = time.perf_counter()
-            try:
-                self.left_arm.gravity_compensation()
-                self.right_arm.gravity_compensation()
-            except Exception as e:
-                self.get_logger().error(f'Control loop error: {e}')
-                break
-            elapsed = time.perf_counter() - t0
-            sleep_time = period - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-    
-    def _startup_arms(self):
-        arm_config_0: Dict[str, Any] = {
-        "can_port": "can1",
-        "urdf_name": "a5.urdf",
-        # Add necessary configuration parameters for the left arm
-        }
-
-        arm_config_1: Dict[str, Any] = {
-        "can_port": "can3",
-        "urdf_name": "a5.urdf",
-        # Add necessary configuration parameters for the right arm
-        }
-        self.left_arm = SingleArm(arm_config_0)
-        self.right_arm = SingleArm(arm_config_1)
 
     def _img_head_callback(self, msg: CompressedImage):
         self.img_head_deque.pop(msg)
@@ -106,7 +70,7 @@ class BimanualArmControllerNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = BimanualArmController()
+    node = BimanualArmControllerNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

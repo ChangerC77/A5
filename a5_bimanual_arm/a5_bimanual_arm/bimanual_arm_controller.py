@@ -1,16 +1,22 @@
 from arx_a5_python import SingleArm
 from typing import Dict, Any, List, Optional, Union
 import numpy as np
+import os
 import threading
 import queue
 import time
+from pathlib import Path
 from transitions import Machine
+
+from a5_bimanual_arm.recorder import EpisodeRecorder
 
 class BimanualArmFSM():
 
     states = ['initialized', 'homing', 'ready', 'collecting', 'inferring']
 
-    def __init__(self, logger, mode: str = 'collect'):
+    def __init__(self, logger, mode: str = 'collect',
+                 recorder_config_path: Optional[str] = None,
+                 datasets_dir: str = './datasets'):
         if mode not in ('collect', 'infer'):
             raise ValueError(f"mode must be 'collect' or 'infer', got '{mode}'")
         self._logger = logger
@@ -19,6 +25,13 @@ class BimanualArmFSM():
         self._ctrl_running = True
         self._event_queue = queue.Queue()
         self._homing_start_time: Optional[float] = None
+
+        self._datasets_dir = datasets_dir
+        self._episode_counter = self._find_max_episode(datasets_dir) + 1
+
+        self._recorder = EpisodeRecorder(
+            logger, config_path=recorder_config_path,
+        )
 
         self.machine = Machine(
             model=self,
@@ -45,7 +58,7 @@ class BimanualArmFSM():
             trigger='end_task', source=['collecting', 'inferring'], dest='homing',
         )
 
-        self._ctrl_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._ctrl_thread = threading.Thread(target=self._fsm_task, daemon=True)
 
 
         self.get_logger().info('BimanualArmFSM started.')
@@ -71,6 +84,8 @@ class BimanualArmFSM():
 
     def on_exit_collecting(self, event):
         self.get_logger().info('Data collection stopped.')
+        self._stop_collect()
+        self._go_home()
 
     def on_enter_inferring(self, event):
         self.get_logger().info('Inference started.')
@@ -89,9 +104,9 @@ class BimanualArmFSM():
 
     # ---- control loop (180Hz) ----
 
-    def _control_loop(self):
-        period = 1.0 / 180.0
-        self.get_logger().info('Control loop started at 180Hz.')
+    def _fsm_task(self):
+        period = 1.0 / 30.0
+        self.get_logger().info('fsm started at 30hz.')
         self.start_homing()
         while self._ctrl_running:
             t0 = time.perf_counter()
@@ -135,10 +150,53 @@ class BimanualArmFSM():
     # ---- placeholder methods (to be implemented) ----
 
     def _init_collect(self):
-        pass
+        self._recorder.start_episode()
 
     def _collect_step(self):
-        pass
+        qpos_dict = self._get_joint_positions("both")
+        qvel_dict = self.get_joint_velocities("both")
+        qpos = np.concatenate([qpos_dict["left"], qpos_dict["right"]])
+        qvel = np.concatenate([qvel_dict["left"], qvel_dict["right"]])
+        self._recorder.record_observation(qpos, qvel)
+        self._recorder.record_action(qpos)
+
+    def _stop_collect(self):
+        if not self._recorder.is_recording:
+            return
+        self._recorder.stop_episode()
+        if self._recorder.num_episodes == 0:
+            return
+        save_path = os.path.join(
+            self._datasets_dir, f"episode_{self._episode_counter}.hdf5"
+        )
+        threading.Thread(
+            target=self._save_episode, args=(save_path,), daemon=True,
+        ).start()
+        self._episode_counter += 1
+
+    def _save_episode(self, path: str):
+        try:
+            self._recorder.save(path)
+            self._recorder.clear_episodes()
+        except Exception as e:
+            self.get_logger().error(f'Failed to save episode: {e}')
+
+    def record_image(self, key: str, image):
+        self._recorder.record_image(key, image)
+
+    @staticmethod
+    def _find_max_episode(datasets_dir: str) -> int:
+        max_ep = -1
+        if not os.path.exists(datasets_dir):
+            return max_ep
+        for filename in os.listdir(datasets_dir):
+            if filename.startswith('episode_') and filename.endswith('.hdf5'):
+                try:
+                    num = int(filename.split('_')[1].split('.')[0])
+                    max_ep = max(max_ep, num)
+                except (ValueError, IndexError):
+                    continue
+        return max_ep
         
 
     def _init_infer(self):
@@ -225,6 +283,8 @@ class BimanualArmFSM():
         self.right_arm = SingleArm(arm_config_1)
 
     def shutdown(self):
+        if self._recorder.is_recording:
+            self._recorder.stop_episode()
         self._ctrl_running = False
         self._ctrl_thread.join(timeout=2.0)
         self.get_logger().info('BimanualArmFSM shut down.')
