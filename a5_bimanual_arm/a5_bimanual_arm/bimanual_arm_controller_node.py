@@ -30,16 +30,6 @@ class BimanualArmControllerNode(Node):
         img_head_topic = self.get_parameter('img_head_topic').get_parameter_value().string_value
         img_left_topic = self.get_parameter('img_left_topic').get_parameter_value().string_value
         img_right_topic = self.get_parameter('img_right_topic').get_parameter_value().string_value
-        # self._img_deques: Dict[str, deque] = {
-        #     'img_head': self.img_head_deque,
-        #     'img_left': self.img_left_deque,
-        #     'img_right': self.img_right_deque,
-        # }
-        # img_topics = {
-        #     'img_head': img_head_topic,
-        #     'img_left': img_left_topic,
-        #     'img_right': img_right_topic,
-        # }
         self.head_realsense_sub=Subscriber(self,Image, img_head_topic)
         self.left_realsense_sub=Subscriber(self,Image, img_left_topic)
         self.right_realsense_sub=Subscriber(self,Image, img_right_topic)        
