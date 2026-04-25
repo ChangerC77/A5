@@ -92,6 +92,8 @@ class EpisodeRecorder:
         self._image_ts: Dict[str, deque] = {}
         self._image_data: Dict[str, deque] = {}
         self._latest_image_time: Dict[str, float] = {}
+        self._sync_attempts = 0
+        self._sync_successes = 0
 
         self._lock = threading.RLock()
         self._current_episode: Dict[str, List[np.ndarray]] = {}
@@ -109,6 +111,8 @@ class EpisodeRecorder:
             self._image_ts = {name: deque(maxlen=500) for name in self._image_key_names}
             self._image_data = {name: deque(maxlen=500) for name in self._image_key_names}
             self._latest_image_time = {}
+            self._sync_attempts = 0
+            self._sync_successes = 0
 
             self._current_episode = {}
             self._current_episode["timestamp"] = []
@@ -161,17 +165,34 @@ class EpisodeRecorder:
             self._image_data[key].append(rgb)
             self._latest_image_time[key] = t
 
+            self._logger.debug(
+                f"Image received key={key}, ts={t:.6f}, "
+                f"latest_keys={list(self._latest_image_time.keys())}"
+            )
+
             if len(self._latest_image_time) == len(self._image_key_names):
                 self._try_sync_frame()
 
     def _try_sync_frame(self) -> None:
+        self._sync_attempts += 1
         times = list(self._latest_image_time.values())
         t_max = max(times)
         t_min = min(times)
-        if (t_max - t_min) > self._img_sync_tolerance:
+        skew = t_max - t_min
+        self._logger.debug(
+            f"Sync attempt #{self._sync_attempts}: skew={skew:.6f}s, "
+            f"tolerance={self._img_sync_tolerance:.6f}s"
+        )
+        if skew > self._img_sync_tolerance:
+            self._logger.debug(
+                f"Sync rejected: image skew too large ({skew:.6f}s > {self._img_sync_tolerance:.6f}s)"
+            )
             return
 
         if len(self._joint_ts) < 2:
+            self._logger.debug(
+                f"Sync rejected: insufficient joint samples (len={len(self._joint_ts)})"
+            )
             return
 
         t_ref = t_max
@@ -181,6 +202,10 @@ class EpisodeRecorder:
         for key_name in self._float_key_names:
             interpolated = self._interpolate_joint(t_ref, self._joint_ts, self._joint_data[key_name])
             if interpolated is None:
+                self._logger.debug(
+                    f"Sync rejected: interpolation failed for {key_name}, "
+                    f"joint_ts_len={len(self._joint_ts)}, key_buffer_len={len(self._joint_data[key_name])}"
+                )
                 frame_ok = False
                 break
             self._current_episode[f"observations/{key_name}"].append(interpolated)
@@ -188,6 +213,7 @@ class EpisodeRecorder:
         if frame_ok:
             for key_name in self._image_key_names:
                 if len(self._image_data[key_name]) == 0:
+                    self._logger.debug(f"Sync rejected: empty image buffer for {key_name}")
                     frame_ok = False
                     break
                 self._current_episode[f"observations/{key_name}"].append(self._image_data[key_name][-1])
@@ -205,6 +231,13 @@ class EpisodeRecorder:
                 self._current_episode[self._action_key["name"]].append(interpolated)
         elif self._action_key is not None and len(self._action_ts) == 1:
             self._current_episode[self._action_key["name"]].append(self._action_data[0].copy())
+
+        self._sync_successes += 1
+        self._logger.debug(
+            f"Sync success #{self._sync_successes}: t_ref={t_ref:.6f}, "
+            f"episode_frames={len(self._current_episode['timestamp'])}, "
+            f"action_samples={len(self._action_ts)}, joint_samples={len(self._joint_ts)}"
+        )
 
         self._latest_image_time.clear()
 
@@ -238,6 +271,12 @@ class EpisodeRecorder:
             if not self._recording:
                 return
             self._recording = False
+
+            per_key_counts = {k: len(v) for k, v in self._current_episode.items()}
+            self._logger.debug(
+                f"Stopping episode with counts={per_key_counts}, "
+                f"sync_attempts={self._sync_attempts}, sync_successes={self._sync_successes}"
+            )
 
             has_data = any(len(v) > 0 for v in self._current_episode.values())
             if has_data:
