@@ -55,15 +55,19 @@ def _ros_image_to_rgb(msg: RosImage) -> np.ndarray:
 class EpisodeRecorder:
     def __init__(
         self,
+        logger,
         config_path: Optional[str] = None,
         img_sync_tolerance: float = 0.005,
         joint_buffer_maxlen: int = 2000,
     ):
+        self._logger = logger
         if config_path is not None:
             with open(config_path, "r") as f:
                 self._config = json.load(f)
+            self._logger.info(f'Loaded config from {config_path}')
         else:
             self._config = _DEFAULT_CONFIG
+            self._logger.info('Using default config')
 
         self._img_sync_tolerance = img_sync_tolerance
         self._joint_buffer_maxlen = joint_buffer_maxlen
@@ -95,7 +99,7 @@ class EpisodeRecorder:
             self.stop_episode()
 
         self._recording = True
-        self._joint_ts.clear()
+        self._logger.info(f'Episode {len(self._episodes)} started')
         self._joint_data = {name: deque(maxlen=self._joint_buffer_maxlen) for name in self._float_key_names}
         self._action_ts.clear()
         self._action_data.clear()
@@ -131,6 +135,7 @@ class EpisodeRecorder:
         if not self._recording:
             return
         if key not in self._image_key_names:
+            self._logger.warning(f'Unknown image key: {key}')
             return
         t = time.perf_counter()
         if isinstance(image, RosImage):
@@ -218,7 +223,14 @@ class EpisodeRecorder:
         has_data = any(len(v) > 0 for v in self._current_episode.values())
         if has_data:
             self._episodes.append(self._current_episode)
+            frame_count = len(self._current_episode.get("timestamp", []))
+            self._logger.info(f'Episode {len(self._episodes) - 1} stopped, {frame_count} frames recorded')
+        else:
+            self._logger.warning('Episode stopped with no data')
         self._current_episode = {}
+
+    def clear_episodes(self) -> None:
+        self._episodes.clear()
 
     @property
     def num_episodes(self) -> int:
@@ -234,6 +246,7 @@ class EpisodeRecorder:
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._logger.info(f'Saving {self.num_episodes} episodes to {output_path}')
 
         with h5py.File(str(output_path), "w") as f:
             data_group = f.create_group("data")
@@ -264,6 +277,10 @@ class EpisodeRecorder:
             meta_group = f.create_group("meta")
             meta_group.create_dataset("config", data=json.dumps(self._config))
             meta_group.create_dataset("num_episodes", data=len(self._episodes))
+        self._logger.info(f'Saved {self.num_episodes} episodes to {output_path}')
+
+    def get_logger(self):
+        return self._logger
 
     @classmethod
     def load_config_template(cls, output_path: str) -> None:

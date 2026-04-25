@@ -60,6 +60,7 @@ class BimanualArmControllerNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = BimanualArmControllerNode()
+    node = BimanualArmControllerNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
