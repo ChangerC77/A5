@@ -101,7 +101,6 @@ class BimanualArmFSM():
     def on_exit_collecting(self, event):
         self.get_logger().info('Data collection stopped.')
         self._stop_collect()
-        self._go_home()
 
     def on_enter_inferring(self, event):
         self.get_logger().info('Inference started.')
@@ -136,14 +135,16 @@ class BimanualArmFSM():
             self._process_events()
             self._process_auto_transitions()
             try:
-                if self.is_collecting():
+                if self.is_ready():
+                    self._gravity_compensation()
+                elif self.is_collecting():
                     self._collect_step()
                 elif self.is_inferring():
                     self._infer_step()
                 elif self.is_replaying():
                     self._replay_step()
-                else:
-                    self._gravity_compensation()
+                # else:
+                #     self._gravity_compensation()
             except Exception as e:
                 self.get_logger().error(f'Control loop error: {e}')
                 break
@@ -182,6 +183,7 @@ class BimanualArmFSM():
         self._recorder.start_episode()
 
     def _collect_step(self):
+        self._gravity_compensation()
         qpos = self.get_joint_positions()
         qvel = self.get_joint_velocities()
         self._recorder.record_observation(qpos=qpos, qvel=qvel)
