@@ -10,12 +10,14 @@ class BimanualArmFSM():
 
     states = ['initialized', 'homing', 'ready', 'collecting', 'inferring']
 
-    def __init__(self, logger, mode: str = 'collect'):
+    def __init__(self, logger, mode: str = 'collect',ctrl_rate=180):
         if mode not in ('collect', 'infer'):
             raise ValueError(f"mode must be 'collect' or 'infer', got '{mode}'")
         self._logger = logger
+        self._ctrl_rate=ctrl_rate
         self.mode = mode
         self._homing_duration = 3.0
+        self._joint_num = 14
         self._ctrl_running = True
         self._event_queue = queue.Queue()
         self._homing_start_time: Optional[float] = None
@@ -90,7 +92,7 @@ class BimanualArmFSM():
     # ---- control loop (180Hz) ----
 
     def _control_loop(self):
-        period = 1.0 / 180.0
+        period = 1.0 / self._ctrl_rate
         self.get_logger().info('Control loop started at 180Hz.')
         self.start_homing()
         while self._ctrl_running:
@@ -177,36 +179,22 @@ class BimanualArmFSM():
                 **kwargs
             )
 
-    def _get_joint_positions(
+    def get_joint_positions(
         self,
-        arm: str = "both",
-        joint_names: Optional[Dict[str, Union[str, List[str]]]] = None,
-    ) -> Dict[str, np.ndarray]:
-        result = {}
-        if arm in ["left", "both"]:
-            result["left"] = self.left_arm.get_joint_positions(
-                joint_names.get("left") if joint_names else None
-            )
-        if arm in ["right", "both"]:
-            result["right"] = self.right_arm.get_joint_positions(
-                joint_names.get("right") if joint_names else None
-            )
+    ) -> np.ndarray:
+        result = np.zeros(self._joint_num)
+        for idx in range(self._joint_num):
+            result[idx] = self.left_arm.get_joint_positions()[idx]
+            result[idx+self._joint_num/2] = self.right_arm.get_joint_positions()[idx]
         return result
 
     def get_joint_velocities(
         self,
-        arm: str = "both",
-        joint_names: Optional[Dict[str, Union[str, List[str]]]] = None,
-    ) -> Dict[str, np.ndarray]:
-        result = {}
-        if arm in ["left", "both"]:
-            result["left"] = self.left_arm.get_joint_velocities(
-                joint_names.get("left") if joint_names else None
-            )
-        if arm in ["right", "both"]:
-            result["right"] = self.right_arm.get_joint_velocities(
-                joint_names.get("right") if joint_names else None
-            )
+    ) -> np.ndarray:
+        result = np.zeros(self._joint_num)
+        for idx in range(self._joint_num):
+            result[idx] = self.left_arm.get_joint_velocities()[idx]
+            result[idx+self._joint_num/2] = self.right_arm.get_joint_velocities()[idx]
         return result
 
     def get_logger(self):
