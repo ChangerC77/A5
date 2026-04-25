@@ -1,10 +1,10 @@
 import rclpy
 from rclpy.node import Node
-from bimanual_arm_controller import BimanualArmFSM
+from a5_bimanual_arm.bimanual_arm_controller import BimanualArmFSM
+from a5_bimanual_arm.keyboard_handler import KeyboardHandler
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from sensor_msgs.msg import Image
-from keyboard_handler import KeyboardHandler
 
 
 class BimanualArmControllerNode(Node):

@@ -12,17 +12,17 @@ def generate_launch_description():
     )
     img_head_topic_arg = DeclareLaunchArgument(
         'img_head_topic',
-        default_value='/camera_head/image/',
+        default_value='/camera/camera_h/color/image_rect_raw',
         description='Head camera image topic'
     )
     img_left_topic_arg = DeclareLaunchArgument(
         'img_left_topic',
-        default_value='/camera_left/image/',
+        default_value='/camera/camera_l/color/image_rect_raw',
         description='Left wrist camera image topic'
     )
     img_right_topic_arg = DeclareLaunchArgument(
         'img_right_topic',
-        default_value='/camera_right/image/',
+        default_value='/camera/camera_r/color/image_rect_raw',
         description='Right wrist camera image topic'
     )
 

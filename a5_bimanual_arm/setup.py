@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'bimanual_arm_controller = a5_bimanual_arm.bimanual_arm_controller_node:main',
+            'bimanual_arm_controller_node = a5_bimanual_arm.bimanual_arm_controller_node:main',
         ],
     },
 )

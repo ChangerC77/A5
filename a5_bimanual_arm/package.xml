@@ -7,8 +7,17 @@
   <maintainer email="2676239430@qq.com">tony</maintainer>
   <license>TODO: License declaration</license>
 
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>arx_a5_python</depend>
   <depend>rclpy</depend>
-  <exec_depend>keyboard-handler</exec_depend>
+  <depend>message_filters</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <exec_depend>python3-transitions</exec_depend>
+  <exec_depend>python3-h5py</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
