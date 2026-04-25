@@ -4,9 +4,9 @@ shell_type=${SHELL##*/}
 shell_exec="exec $shell_type"
 
 declare -A CAMS=(
-  [camera_h]=""
-  [camera_l]=""
-  [camera_r]=""
+  [camera_h]="218622274187"
+  [camera_l]="352122270955"
+  [camera_r]="230422272806"
 )
 
 COLOR_PROFILE="640x480x90"
@@ -56,7 +56,8 @@ launch_cam()
   ros2 launch realsense2_camera rs_launch.py \
   camera_name:=${cam_name} \
   depth_module.color_profile:=${COLOR_PROFILE} \
-  depth_module.depth_profile:=${DEPTH_PROFILE} \
+  depth_module.depth_profile:=0 \
+  enable_depth:=false \
   serial_no:=${sn}
   $shell_exec"
 

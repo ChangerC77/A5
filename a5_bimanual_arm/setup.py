@@ -9,7 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['package.xml', 'launch/bimanual_arm.launch.py']),
     ],
     install_requires=['setuptools', 'transitions', 'h5py', 'numpy', 'cv_bridge', 'message_filters'],
     python_requires='>=3.8',

@@ -17,7 +17,7 @@ class BimanualArmFSM():
     def __init__(self, logger, mode: str = 'collect',
                  recorder_config_path: Optional[str] = None,
                  datasets_dir: str = './datasets'):
-        if mode not in ('collect', 'infer'):
+        if mode not in ('collect', 'infer','replay'):
             raise ValueError(f"mode must be 'collect' or 'infer', got '{mode}'")
         self._logger = logger
         self.mode = mode
