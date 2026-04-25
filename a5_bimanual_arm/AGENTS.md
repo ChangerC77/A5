@@ -68,7 +68,7 @@ initialized → homing → ready → collecting/inferring → homing → ...
 
 ### 控制循环
 
-独立线程以 180Hz 运行，每帧执行：
+独立线程以 30Hz 运行，每帧执行：
 1. 处理事件队列（键盘输入）
 2. 处理自动状态转换（homing 超时）
 3. 执行当前状态的动作步骤（`_collect_step` / `_infer_step` / `_gravity_compensation`）

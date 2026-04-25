@@ -26,6 +26,7 @@ class BimanualArmFSM():
         self._ctrl_running = True
         self._event_queue = queue.Queue()
         self._homing_start_time: Optional[float] = None
+        self._save_thread: Optional[threading.Thread] = None
 
         self._datasets_dir = datasets_dir
         self._episode_counter = self._find_max_episode(datasets_dir) + 1
@@ -151,6 +152,10 @@ class BimanualArmFSM():
     # ---- placeholder methods (to be implemented) ----
 
     def _init_collect(self):
+        if self._save_thread is not None and self._save_thread.is_alive():
+            self.get_logger().info('Waiting for previous episode save to finish...')
+            self._save_thread.join()
+            self._save_thread = None
         self._recorder.start_episode()
 
     def _collect_step(self):
@@ -168,9 +173,10 @@ class BimanualArmFSM():
         save_path = os.path.join(
             self._datasets_dir, f"episode_{self._episode_counter}.hdf5"
         )
-        threading.Thread(
+        self._save_thread = threading.Thread(
             target=self._save_episode, args=(save_path,), daemon=True,
-        ).start()
+        )
+        self._save_thread.start()
         self._episode_counter += 1
 
     def _save_episode(self, path: str):
@@ -237,19 +243,23 @@ class BimanualArmFSM():
     def get_joint_positions(
         self,
     ) -> np.ndarray:
+        half = self._joint_num // 2
         result = np.zeros(self._joint_num)
-        for idx in range(self._joint_num):
-            result[idx] = self.left_arm.get_joint_positions()[idx]
-            result[idx+self._joint_num/2] = self.right_arm.get_joint_positions()[idx]
+        left = self.left_arm.get_joint_positions()
+        right = self.right_arm.get_joint_positions()
+        result[:half] = left[:half]
+        result[half:] = right[:half]
         return result
 
     def get_joint_velocities(
         self,
     ) -> np.ndarray:
+        half = self._joint_num // 2
         result = np.zeros(self._joint_num)
-        for idx in range(self._joint_num):
-            result[idx] = self.left_arm.get_joint_velocities()[idx]
-            result[idx+self._joint_num//2] = self.right_arm.get_joint_velocities()[idx]
+        left = self.left_arm.get_joint_velocities()
+        right = self.right_arm.get_joint_velocities()
+        result[:half] = left[:half]
+        result[half:] = right[:half]
         return result
 
     def get_logger(self):
