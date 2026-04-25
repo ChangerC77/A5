@@ -13,6 +13,7 @@ class BimanualArmControllerNode(Node):
         super().__init__('bimanual_arm_controller')
 
         self.declare_parameter('mode', 'collect')
+        self.declare_parameter('datasets_dir', './datasets')
         self.declare_parameter('img_head_topic', '/camera_head/image/')
         self.declare_parameter('img_left_topic', '/camera_left/image/')
         self.declare_parameter('img_right_topic', '/camera_right/image/')
@@ -22,7 +23,12 @@ class BimanualArmControllerNode(Node):
             self.get_logger().error(f"Invalid mode '{self.arm_mode}', must be 'collect' or 'infer'")
             raise ValueError(f"mode must be 'collect' or 'infer', got '{self.arm_mode}'")
 
-        self._fsm = BimanualArmFSM(self.get_logger(), self.arm_mode)
+        datasets_dir = self.get_parameter('datasets_dir').get_parameter_value().string_value
+        self._fsm = BimanualArmFSM(
+            self.get_logger(),
+            self.arm_mode,
+            datasets_dir=datasets_dir,
+        )
 
         self._keyboard = KeyboardHandler()
         self._keyboard.add_key_callback('space', self._key_callback)
@@ -35,12 +41,14 @@ class BimanualArmControllerNode(Node):
         self.get_logger().info('BimanualArmController node started.')
 
     def _key_callback(self, key, state):
+        self.get_logger().info(f"key board\n\n\n")
         if state != KeyboardHandler.KEY_STATE_PRESSED:
             return
         if key == 'space':
             self._fsm.on_key_event('space')
         elif key == 'esc':
             self._fsm.on_key_event('esc')
+        
 
     def _init_realsense_sub(self):
         img_head_topic = self.get_parameter('img_head_topic').get_parameter_value().string_value

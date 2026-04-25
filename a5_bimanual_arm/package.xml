@@ -18,6 +18,7 @@
   <exec_depend>python3-transitions</exec_depend>
   <exec_depend>python3-h5py</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-pynput</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
