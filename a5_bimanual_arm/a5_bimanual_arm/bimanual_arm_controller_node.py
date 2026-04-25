@@ -15,20 +15,26 @@ class BimanualArmControllerNode(Node):
 
         self.declare_parameter('mode', 'collect')
         self.declare_parameter('datasets_dir', './datasets')
+        self.declare_parameter('replay_hdf5_path', '')
+        self.declare_parameter('replay_demo_index', 0)
         self.declare_parameter('img_head_topic', '/camera_head/image')
         self.declare_parameter('img_left_topic', '/camera_left/image')
         self.declare_parameter('img_right_topic', '/camera_right/image')
 
         self.arm_mode = self.get_parameter('mode').get_parameter_value().string_value
-        if self.arm_mode not in ('collect', 'infer'):
-            self.get_logger().error(f"Invalid mode '{self.arm_mode}', must be 'collect' or 'infer'")
-            raise ValueError(f"mode must be 'collect' or 'infer', got '{self.arm_mode}'")
+        if self.arm_mode not in ('collect', 'infer', 'replay'):
+            self.get_logger().error(f"Invalid mode '{self.arm_mode}', must be 'collect', 'infer', or 'replay'")
+            raise ValueError(f"mode must be 'collect', 'infer', or 'replay', got '{self.arm_mode}'")
 
         datasets_dir = self.get_parameter('datasets_dir').get_parameter_value().string_value
+        replay_hdf5_path = self.get_parameter('replay_hdf5_path').get_parameter_value().string_value
+        replay_demo_index = self.get_parameter('replay_demo_index').get_parameter_value().integer_value
         self._fsm = BimanualArmFSM(
             self.get_logger(),
             self.arm_mode,
             datasets_dir=datasets_dir,
+            replay_hdf5_path=replay_hdf5_path,
+            replay_demo_index=replay_demo_index,
         )
 
         self._keyboard = KeyboardHandler()
@@ -42,7 +48,10 @@ class BimanualArmControllerNode(Node):
             self._debug_timer = self.create_timer(2.0, self._report_realsense_stats)
             self._init_realsense_sub()
 
-        self.get_logger().info(f'Mode: {self.arm_mode}, datasets_dir: {datasets_dir}')
+        self.get_logger().info(
+            f'Mode: {self.arm_mode}, datasets_dir: {datasets_dir}, '
+            f'replay_hdf5_path: {replay_hdf5_path}, replay_demo_index: {replay_demo_index}'
+        )
         self.get_logger().info('BimanualArmController node started.')
 
     def _key_callback(self, key, state):

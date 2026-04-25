@@ -1,5 +1,6 @@
 from arx_a5_python import SingleArm
 from typing import Dict, Any, List, Optional, Union
+import h5py
 import numpy as np
 import os
 import threading
@@ -12,13 +13,15 @@ from a5_bimanual_arm.recorder import EpisodeRecorder
 
 class BimanualArmFSM():
 
-    states = ['initialized', 'homing', 'ready', 'collecting', 'inferring']
+    states = ['initialized', 'homing', 'ready', 'collecting', 'inferring', 'replaying']
 
     def __init__(self, logger, mode: str = 'collect',
                  recorder_config_path: Optional[str] = None,
-                 datasets_dir: str = './datasets'):
-        if mode not in ('collect', 'infer','replay'):
-            raise ValueError(f"mode must be 'collect' or 'infer', got '{mode}'")
+                 datasets_dir: str = './datasets',
+                 replay_hdf5_path: str = '',
+                 replay_demo_index: int = 0):
+        if mode not in ('collect', 'infer', 'replay'):
+            raise ValueError(f"mode must be 'collect', 'infer', or 'replay', got '{mode}'")
         self._logger = logger
         self.mode = mode
         self._homing_duration = 3.0
@@ -30,6 +33,13 @@ class BimanualArmFSM():
 
         self._datasets_dir = datasets_dir
         self._episode_counter = self._find_max_episode(datasets_dir) + 1
+        self._replay_hdf5_path = replay_hdf5_path.strip()
+        self._replay_demo_index = max(0, int(replay_demo_index))
+        self._replay_actions: Optional[np.ndarray] = None
+        self._replay_rel_timestamps: Optional[np.ndarray] = None
+        self._replay_frame_idx = 0
+        self._replay_start_time: Optional[float] = None
+        self._replay_init_failed = False
 
         self._recorder = EpisodeRecorder(
             logger, config_path=recorder_config_path,
@@ -57,7 +67,11 @@ class BimanualArmFSM():
             conditions=[lambda e: self.mode == 'infer'],
         )
         self.machine.add_transition(
-            trigger='end_task', source=['collecting', 'inferring'], dest='homing',
+            trigger='begin_task', source='ready', dest='replaying',
+            conditions=[lambda e: self.mode == 'replay'],
+        )
+        self.machine.add_transition(
+            trigger='end_task', source=['collecting', 'inferring', 'replaying'], dest='homing',
         )
 
         self._ctrl_thread = threading.Thread(target=self._fsm_task, daemon=True)
@@ -96,6 +110,13 @@ class BimanualArmFSM():
     def on_exit_inferring(self, event):
         self.get_logger().info('Inference stopped.')
 
+    def on_enter_replaying(self, event):
+        self.get_logger().info('Replay started.')
+        self._init_replay()
+
+    def on_exit_replaying(self, event):
+        self.get_logger().info('Replay stopped.')
+
     # ---- external key input ----
 
     def on_key_event(self, key: str):
@@ -119,6 +140,8 @@ class BimanualArmFSM():
                     self._collect_step()
                 elif self.is_inferring():
                     self._infer_step()
+                elif self.is_replaying():
+                    self._replay_step()
                 else:
                     self._gravity_compensation()
             except Exception as e:
@@ -138,7 +161,7 @@ class BimanualArmFSM():
             if event == 'toggle_task':
                 if self.is_ready():
                     self.begin_task()
-                elif self.is_collecting() or self.is_inferring():
+                elif self.is_collecting() or self.is_inferring() or self.is_replaying():
                     self.end_task()
             elif event == 'shutdown':
                 self._ctrl_running = False
@@ -209,6 +232,152 @@ class BimanualArmFSM():
 
     def _infer_step(self):
         pass
+
+    @staticmethod
+    def _find_latest_episode_file(datasets_dir: str) -> Optional[Path]:
+        datasets_path = Path(datasets_dir)
+        if not datasets_path.exists():
+            return None
+        best_num = -1
+        best_path: Optional[Path] = None
+        for path in datasets_path.glob('episode_*.hdf5'):
+            stem = path.stem
+            try:
+                num = int(stem.split('_', 1)[1])
+            except (IndexError, ValueError):
+                continue
+            if num > best_num:
+                best_num = num
+                best_path = path
+        return best_path
+
+    def _resolve_replay_file(self) -> Optional[Path]:
+        if self._replay_hdf5_path:
+            path = Path(self._replay_hdf5_path).expanduser()
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            return path
+        return self._find_latest_episode_file(self._datasets_dir)
+
+    def _load_replay_episode(self, episode_path: Path, demo_idx: int) -> Dict[str, np.ndarray]:
+        if not episode_path.exists():
+            raise FileNotFoundError(f'Replay file not found: {episode_path}')
+
+        with h5py.File(str(episode_path), 'r') as h5_file:
+            if 'data' not in h5_file:
+                raise KeyError(f"Missing 'data' group in {episode_path}")
+
+            data_group = h5_file['data']
+            demo_key = f'demo_{demo_idx}'
+            if demo_key not in data_group:
+                raise KeyError(f"Missing '{demo_key}' in {episode_path}")
+            demo_group = data_group[demo_key]
+
+            if 'actions' in demo_group:
+                actions = np.asarray(demo_group['actions'], dtype=np.float64)
+            elif 'observations' in demo_group and 'qpos' in demo_group['observations']:
+                actions = np.asarray(demo_group['observations']['qpos'], dtype=np.float64)
+            else:
+                raise KeyError('Replay episode must contain data/demo_x/actions or data/demo_x/observations/qpos')
+
+            if actions.ndim != 2 or actions.shape[1] != self._joint_num:
+                raise ValueError(
+                    f'Invalid replay action shape {actions.shape}, expected (N, {self._joint_num})'
+                )
+
+            if 'timestamp' in demo_group:
+                timestamps = np.asarray(demo_group['timestamp'], dtype=np.float64)
+            else:
+                self.get_logger().warning('Replay episode has no timestamp, fallback to 30Hz timing.')
+                timestamps = np.arange(actions.shape[0], dtype=np.float64) / 30.0
+
+        frame_count = min(actions.shape[0], timestamps.shape[0])
+        if frame_count <= 0:
+            raise ValueError('Replay episode is empty')
+
+        actions = actions[:frame_count]
+        timestamps = timestamps[:frame_count]
+        if frame_count > 1:
+            delta = np.diff(timestamps)
+            if np.any(delta < 0.0):
+                self.get_logger().warning('Replay timestamps are out of order, fallback to 30Hz timing.')
+                rel_timestamps = np.arange(frame_count, dtype=np.float64) / 30.0
+            else:
+                rel_timestamps = timestamps - timestamps[0]
+        else:
+            rel_timestamps = np.zeros((1,), dtype=np.float64)
+
+        return {
+            'actions': actions,
+            'rel_timestamps': rel_timestamps,
+        }
+
+    def _init_replay(self):
+        self._replay_actions = None
+        self._replay_rel_timestamps = None
+        self._replay_frame_idx = 0
+        self._replay_start_time = None
+        self._replay_init_failed = False
+
+        replay_path = self._resolve_replay_file()
+        if replay_path is None:
+            self.get_logger().error(
+                f'No replay file found under datasets_dir={self._datasets_dir}. '
+                'Expected files like episode_0.hdf5.'
+            )
+            self._replay_init_failed = True
+            return
+
+        try:
+            replay_data = self._load_replay_episode(replay_path, self._replay_demo_index)
+        except Exception as e:
+            self.get_logger().error(f'Failed to load replay episode: {e}')
+            self._replay_init_failed = True
+            return
+
+        self._replay_actions = replay_data['actions']
+        self._replay_rel_timestamps = replay_data['rel_timestamps']
+        self._replay_frame_idx = 0
+        self._replay_start_time = time.perf_counter()
+        self.get_logger().info(
+            f"Replay loaded: file={replay_path}, demo={self._replay_demo_index}, "
+            f"frames={self._replay_actions.shape[0]}"
+        )
+
+    def _replay_step(self):
+        if self._replay_init_failed:
+            self.end_task()
+            return
+
+        if self._replay_actions is None or self._replay_rel_timestamps is None or self._replay_start_time is None:
+            self.get_logger().error('Replay is not initialized correctly.')
+            self.end_task()
+            return
+
+        total_frames = self._replay_actions.shape[0]
+        if self._replay_frame_idx >= total_frames:
+            self.get_logger().info('Replay finished.')
+            self.end_task()
+            return
+
+        elapsed = time.perf_counter() - self._replay_start_time
+        next_idx = self._replay_frame_idx
+        while next_idx < total_frames and self._replay_rel_timestamps[next_idx] <= elapsed:
+            next_idx += 1
+
+        if next_idx == self._replay_frame_idx:
+            return
+
+        send_idx = next_idx - 1
+        action = self._replay_actions[send_idx]
+        half = self._joint_num // 2
+        self.left_arm.set_joint_positions(action[:half])
+        self.right_arm.set_joint_positions(action[half:])
+        self._replay_frame_idx = next_idx
+
+        if self._replay_frame_idx >= total_frames:
+            self.get_logger().info('Replay completed all frames.')
+            self.end_task()
 
     # ---- hardware methods ----
 

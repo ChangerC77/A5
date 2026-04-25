@@ -8,12 +8,22 @@ def generate_launch_description():
     mode_arg = DeclareLaunchArgument(
         'mode',
         default_value='collect',
-        description='Running mode: collect or infer'
+        description='Running mode: collect, infer, or replay'
     )
     datasets_dir_arg = DeclareLaunchArgument(
         'datasets_dir',
         default_value='/home/arx/WBCD/A5/datasets',
         description='Directory for collected episode datasets'
+    )
+    replay_hdf5_path_arg = DeclareLaunchArgument(
+        'replay_hdf5_path',
+        default_value='',
+        description='Replay HDF5 path. Empty means use latest episode in datasets_dir'
+    )
+    replay_demo_index_arg = DeclareLaunchArgument(
+        'replay_demo_index',
+        default_value='0',
+        description='Replay demo index under data/demo_x'
     )
     img_head_topic_arg = DeclareLaunchArgument(
         'img_head_topic',
@@ -39,6 +49,8 @@ def generate_launch_description():
         parameters=[{
             'mode': LaunchConfiguration('mode'),
             'datasets_dir': LaunchConfiguration('datasets_dir'),
+            'replay_hdf5_path': LaunchConfiguration('replay_hdf5_path'),
+            'replay_demo_index': LaunchConfiguration('replay_demo_index'),
             'img_head_topic': LaunchConfiguration('img_head_topic'),
             'img_left_topic': LaunchConfiguration('img_left_topic'),
             'img_right_topic': LaunchConfiguration('img_right_topic'),
@@ -48,6 +60,8 @@ def generate_launch_description():
     return LaunchDescription([
         mode_arg,
         datasets_dir_arg,
+        replay_hdf5_path_arg,
+        replay_demo_index_arg,
         img_head_topic_arg,
         img_left_topic_arg,
         img_right_topic_arg,
