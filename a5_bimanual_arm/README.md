@@ -1,26 +1,10 @@
 # a5_bimanual_arm
 
-ROS2 (Jazzy) 双臂机械臂控制器包，基于有限状态机（FSM）管理双臂生命周期，支持三种运行模式：
+ROS2  双臂机械臂控制器包，支持三种运行模式：
 
 - `collect`：采集关节状态、动作与三路图像并保存为 HDF5
 - `infer`：推理占位模式（当前接口保留，逻辑待业务实现）
 - `replay`：回放 HDF5 轨迹到双臂关节
-
-## 目录结构
-
-```text
-a5_bimanual_arm/
-├── a5_bimanual_arm/
-│   ├── bimanual_arm_controller.py      # 核心 FSM 控制器
-│   ├── bimanual_arm_controller_node.py # ROS2 节点入口
-│   ├── recorder.py                      # 采集缓存与 HDF5 保存
-│   └── keyboard_handler.py              # SPACE/ESC 键盘输入
-├── launch/
-│   └── bimanual_arm.launch.py
-├── test/
-├── package.xml
-└── setup.py
-```
 
 ## 依赖
 

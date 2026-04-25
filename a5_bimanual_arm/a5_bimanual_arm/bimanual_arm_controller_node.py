@@ -17,9 +17,9 @@ class BimanualArmControllerNode(Node):
         self.declare_parameter('datasets_dir', './datasets')
         self.declare_parameter('replay_hdf5_path', '')
         self.declare_parameter('replay_demo_index', 0)
-        self.declare_parameter('img_head_topic', '/camera_head/image')
-        self.declare_parameter('img_left_topic', '/camera_left/image')
-        self.declare_parameter('img_right_topic', '/camera_right/image')
+        self.declare_parameter('img_head_topic', '/camera/camera_h/color/image_rect_raw')
+        self.declare_parameter('img_left_topic', '/camera/camera_l/color/image_rect_raw')
+        self.declare_parameter('img_right_topic', '/camera/camera_r/color/image_rect_raw')
 
         self.arm_mode = self.get_parameter('mode').get_parameter_value().string_value
         if self.arm_mode not in ('collect', 'infer', 'replay'):
