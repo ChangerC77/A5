@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -92,52 +93,56 @@ class EpisodeRecorder:
         self._image_data: Dict[str, deque] = {}
         self._latest_image_time: Dict[str, float] = {}
 
+        self._lock = threading.RLock()
         self._current_episode: Dict[str, List[np.ndarray]] = {}
 
     def start_episode(self) -> None:
-        if self._recording:
-            self.stop_episode()
+        with self._lock:
+            if self._recording:
+                self.stop_episode()
 
-        self._recording = True
-        self._logger.info(f'Episode {len(self._episodes)} started')
-        self._joint_data = {name: deque(maxlen=self._joint_buffer_maxlen) for name in self._float_key_names}
-        self._action_ts.clear()
-        self._action_data.clear()
-        self._image_ts = {name: deque(maxlen=500) for name in self._image_key_names}
-        self._image_data = {name: deque(maxlen=500) for name in self._image_key_names}
-        self._latest_image_time = {}
+            self._recording = True
+            self._logger.info(f'Episode {len(self._episodes)} started')
+            self._joint_data = {name: deque(maxlen=self._joint_buffer_maxlen) for name in self._float_key_names}
+            self._action_ts.clear()
+            self._action_data.clear()
+            self._image_ts = {name: deque(maxlen=500) for name in self._image_key_names}
+            self._image_data = {name: deque(maxlen=500) for name in self._image_key_names}
+            self._latest_image_time = {}
 
-        self._current_episode = {}
-        self._current_episode["timestamp"] = []
-        for k in self._float_key_names:
-            self._current_episode[f"observations/{k}"] = []
-        for k in self._image_key_names:
-            self._current_episode[f"observations/{k}"] = []
-        if self._action_key is not None:
-            self._current_episode[self._action_key["name"]] = []
+            self._current_episode = {}
+            self._current_episode["timestamp"] = []
+            for k in self._float_key_names:
+                self._current_episode[f"observations/{k}"] = []
+            for k in self._image_key_names:
+                self._current_episode[f"observations/{k}"] = []
+            if self._action_key is not None:
+                self._current_episode[self._action_key["name"]] = []
 
-    def record_observation(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
-        if not self._recording:
-            return
-        t = time.perf_counter()
-        self._joint_ts.append(t)
-        self._joint_data["qpos"].append(np.asarray(qpos, dtype=np.float64).copy())
-        self._joint_data["qvel"].append(np.asarray(qvel, dtype=np.float64).copy())
+    def record_observation(self, **kwargs: np.ndarray) -> None:
+        with self._lock:
+            if not self._recording:
+                return
+            for name in self._float_key_names:
+                if name not in kwargs:
+                    self._logger.warning(f'Missing float obs key: {name}')
+                    continue
+                t = time.perf_counter()
+                self._joint_ts.append(t)
+                self._joint_data[name].append(np.asarray(kwargs[name], dtype=np.float64).copy())
 
     def record_action(self, action: np.ndarray) -> None:
-        if not self._recording or self._action_key is None:
-            return
-        t = time.perf_counter()
-        self._action_ts.append(t)
-        self._action_data.append(np.asarray(action, dtype=np.float64).copy())
+        with self._lock:
+            if not self._recording or self._action_key is None:
+                return
+            t = time.perf_counter()
+            self._action_ts.append(t)
+            self._action_data.append(np.asarray(action, dtype=np.float64).copy())
 
     def record_image(self, key: str, image: Union[RosImage, np.ndarray]) -> None:
-        if not self._recording:
-            return
         if key not in self._image_key_names:
             self._logger.warning(f'Unknown image key: {key}')
             return
-        t = time.perf_counter()
         if isinstance(image, RosImage):
             rgb = _ros_image_to_rgb(image)
         else:
@@ -148,12 +153,16 @@ class EpisodeRecorder:
             else:
                 rgb = image
             rgb = np.asarray(rgb, dtype=np.uint8).copy()
-        self._image_ts[key].append(t)
-        self._image_data[key].append(rgb)
-        self._latest_image_time[key] = t
+        with self._lock:
+            if not self._recording:
+                return
+            t = time.perf_counter()
+            self._image_ts[key].append(t)
+            self._image_data[key].append(rgb)
+            self._latest_image_time[key] = t
 
-        if len(self._latest_image_time) == len(self._image_key_names):
-            self._try_sync_frame()
+            if len(self._latest_image_time) == len(self._image_key_names):
+                self._try_sync_frame()
 
     def _try_sync_frame(self) -> None:
         times = list(self._latest_image_time.values())
@@ -168,18 +177,27 @@ class EpisodeRecorder:
         t_ref = t_max
         self._current_episode["timestamp"].append(np.float64(t_ref))
 
+        frame_ok = True
         for key_name in self._float_key_names:
             interpolated = self._interpolate_joint(t_ref, self._joint_ts, self._joint_data[key_name])
             if interpolated is None:
-                self._current_episode["timestamp"].pop()
-                return
+                frame_ok = False
+                break
             self._current_episode[f"observations/{key_name}"].append(interpolated)
 
-        for key_name in self._image_key_names:
-            if len(self._image_data[key_name]) == 0:
-                self._current_episode["timestamp"].pop()
-                return
-            self._current_episode[f"observations/{key_name}"].append(self._image_data[key_name][-1])
+        if frame_ok:
+            for key_name in self._image_key_names:
+                if len(self._image_data[key_name]) == 0:
+                    frame_ok = False
+                    break
+                self._current_episode[f"observations/{key_name}"].append(self._image_data[key_name][-1])
+
+        if not frame_ok:
+            self._current_episode["timestamp"].pop()
+            for key_name in self._float_key_names:
+                if len(self._current_episode[f"observations/{key_name}"]) > len(self._current_episode["timestamp"]):
+                    self._current_episode[f"observations/{key_name}"].pop()
+            return
 
         if self._action_key is not None and len(self._action_ts) >= 2:
             interpolated = self._interpolate_joint(t_ref, self._action_ts, self._action_data)
@@ -216,21 +234,23 @@ class EpisodeRecorder:
         return d0 + alpha * (d1 - d0)
 
     def stop_episode(self) -> None:
-        if not self._recording:
-            return
-        self._recording = False
+        with self._lock:
+            if not self._recording:
+                return
+            self._recording = False
 
-        has_data = any(len(v) > 0 for v in self._current_episode.values())
-        if has_data:
-            self._episodes.append(self._current_episode)
-            frame_count = len(self._current_episode.get("timestamp", []))
-            self._logger.info(f'Episode {len(self._episodes) - 1} stopped, {frame_count} frames recorded')
-        else:
-            self._logger.warning('Episode stopped with no data')
-        self._current_episode = {}
+            has_data = any(len(v) > 0 for v in self._current_episode.values())
+            if has_data:
+                self._episodes.append(self._current_episode)
+                frame_count = len(self._current_episode.get("timestamp", []))
+                self._logger.info(f'Episode {len(self._episodes) - 1} stopped, {frame_count} frames recorded')
+            else:
+                self._logger.warning('Episode stopped with no data')
+            self._current_episode = {}
 
     def clear_episodes(self) -> None:
-        self._episodes.clear()
+        with self._lock:
+            self._episodes.clear()
 
     @property
     def num_episodes(self) -> int:
@@ -241,16 +261,19 @@ class EpisodeRecorder:
         return self._recording
 
     def save(self, output_path: str) -> None:
-        if self._recording:
-            self.stop_episode()
+        with self._lock:
+            if self._recording:
+                self.stop_episode()
+            episodes = list(self._episodes)
+            config = self._config
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._logger.info(f'Saving {self.num_episodes} episodes to {output_path}')
+        self._logger.info(f'Saving {len(episodes)} episodes to {output_path}')
 
         with h5py.File(str(output_path), "w") as f:
             data_group = f.create_group("data")
-            for i, episode in enumerate(self._episodes):
+            for i, episode in enumerate(episodes):
                 demo_group = data_group.create_group(f"demo_{i}")
                 obs_group = demo_group.create_group("observations")
 
@@ -275,9 +298,9 @@ class EpisodeRecorder:
                         demo_group.create_dataset(key, data=arr)
 
             meta_group = f.create_group("meta")
-            meta_group.create_dataset("config", data=json.dumps(self._config))
-            meta_group.create_dataset("num_episodes", data=len(self._episodes))
-        self._logger.info(f'Saved {self.num_episodes} episodes to {output_path}')
+            meta_group.create_dataset("config", data=json.dumps(config))
+            meta_group.create_dataset("num_episodes", data=len(episodes))
+        self._logger.info(f'Saved {len(episodes)} episodes to {output_path}')
 
     def get_logger(self):
         return self._logger

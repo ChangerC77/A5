@@ -156,7 +156,7 @@ class BimanualArmFSM():
     def _collect_step(self):
         qpos = self.get_joint_positions()
         qvel = self.get_joint_velocities()
-        self._recorder.record_observation(qpos, qvel)
+        self._recorder.record_observation(qpos=qpos, qvel=qvel)
         self._recorder.record_action(qpos)
 
     def _stop_collect(self):
