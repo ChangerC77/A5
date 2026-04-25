@@ -233,9 +233,9 @@ class EpisodeRecorder:
             self._current_episode[self._action_key["name"]].append(self._action_data[0].copy())
 
         self._sync_successes += 1
+        self._logger.info(f"episode_frames={len(self._current_episode['timestamp'])}")
         self._logger.debug(
             f"Sync success #{self._sync_successes}: t_ref={t_ref:.6f}, "
-            f"episode_frames={len(self._current_episode['timestamp'])}, "
             f"action_samples={len(self._action_ts)}, joint_samples={len(self._joint_ts)}"
         )
 
@@ -273,7 +273,7 @@ class EpisodeRecorder:
             self._recording = False
 
             per_key_counts = {k: len(v) for k, v in self._current_episode.items()}
-            self._logger.debug(
+            self._logger.info(
                 f"Stopping episode with counts={per_key_counts}, "
                 f"sync_attempts={self._sync_attempts}, sync_successes={self._sync_successes}"
             )
