@@ -24,7 +24,7 @@ a5_bimanual_arm/
 
 ## 依赖
 
-- ROS2 Jazzy
+- ROS2
 - `arx_a5_python`（`SingleArm` 硬件接口）
 - `transitions`（FSM）
 - `message_filters` + `sensor_msgs`（图像同步）

@@ -135,9 +135,8 @@ class BimanualArmFSM():
             self._process_events()
             self._process_auto_transitions()
             try:
-                if self.is_ready():
-                    self._gravity_compensation()
-                elif self.is_collecting():
+
+                if self.is_collecting():
                     self._collect_step()
                 elif self.is_inferring():
                     self._infer_step()
@@ -449,6 +448,7 @@ class BimanualArmFSM():
         self.right_arm = SingleArm(arm_config_1)
 
     def shutdown(self):
+        self._go_home()
         if self._recorder.is_recording:
             self._recorder.stop_episode()
         self._ctrl_running = False
