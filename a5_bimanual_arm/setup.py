@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools', 'transitions', 'h5py', 'numpy', 'cv_bridge'],
+    install_requires=['setuptools', 'transitions', 'h5py', 'numpy', 'cv_bridge', 'message_filters'],
     python_requires='>=3.8',
     zip_safe=True,
     maintainer='tony',

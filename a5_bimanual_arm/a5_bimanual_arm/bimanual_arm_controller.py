@@ -20,7 +20,6 @@ class BimanualArmFSM():
         if mode not in ('collect', 'infer'):
             raise ValueError(f"mode must be 'collect' or 'infer', got '{mode}'")
         self._logger = logger
-        self._ctrl_rate=ctrl_rate
         self.mode = mode
         self._homing_duration = 3.0
         self._joint_num = 14
@@ -155,10 +154,8 @@ class BimanualArmFSM():
         self._recorder.start_episode()
 
     def _collect_step(self):
-        qpos_dict = self._get_joint_positions("both")
-        qvel_dict = self.get_joint_velocities("both")
-        qpos = np.concatenate([qpos_dict["left"], qpos_dict["right"]])
-        qvel = np.concatenate([qvel_dict["left"], qvel_dict["right"]])
+        qpos = self.get_joint_positions()
+        qvel = self.get_joint_velocities()
         self._recorder.record_observation(qpos, qvel)
         self._recorder.record_action(qpos)
 
@@ -252,7 +249,7 @@ class BimanualArmFSM():
         result = np.zeros(self._joint_num)
         for idx in range(self._joint_num):
             result[idx] = self.left_arm.get_joint_velocities()[idx]
-            result[idx+self._joint_num/2] = self.right_arm.get_joint_velocities()[idx]
+            result[idx+self._joint_num//2] = self.right_arm.get_joint_velocities()[idx]
         return result
 
     def get_logger(self):
