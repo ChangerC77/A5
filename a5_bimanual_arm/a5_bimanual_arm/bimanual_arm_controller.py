@@ -282,4 +282,7 @@ class BimanualArmFSM():
             self._recorder.stop_episode()
         self._ctrl_running = False
         self._ctrl_thread.join(timeout=2.0)
+        if self._save_thread is not None and self._save_thread.is_alive():
+            self._save_thread.join(timeout=5.0)
+            self._save_thread = None
         self.get_logger().info('BimanualArmFSM shut down.')

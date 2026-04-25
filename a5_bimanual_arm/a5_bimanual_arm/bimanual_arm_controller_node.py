@@ -18,9 +18,9 @@ class BimanualArmControllerNode(Node):
         self.declare_parameter('img_right_topic', '/camera_right/image/')
 
         self.arm_mode = self.get_parameter('mode').get_parameter_value().string_value
-
-        if self.arm_mode == 'collect':
-            self._init_realsense_sub()
+        if self.arm_mode not in ('collect', 'infer'):
+            self.get_logger().error(f"Invalid mode '{self.arm_mode}', must be 'collect' or 'infer'")
+            raise ValueError(f"mode must be 'collect' or 'infer', got '{self.arm_mode}'")
 
         self._fsm = BimanualArmFSM(self.get_logger(), self.arm_mode)
 
@@ -28,6 +28,9 @@ class BimanualArmControllerNode(Node):
         self._keyboard.add_key_callback('space', self._key_callback)
         self._keyboard.add_key_callback('esc', self._key_callback)
         self._keyboard.start()
+
+        if self.arm_mode == 'collect':
+            self._init_realsense_sub()
 
         self.get_logger().info('BimanualArmController node started.')
 
@@ -62,12 +65,15 @@ class BimanualArmControllerNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = BimanualArmControllerNode()
+    node = None
     try:
+        node = BimanualArmControllerNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node._fsm.shutdown()
-        node.destroy_node()
+        if node is not None:
+            node._fsm.shutdown()
+            node._keyboard.stop()
+            node.destroy_node()
         rclpy.shutdown()
