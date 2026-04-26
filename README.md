@@ -29,9 +29,9 @@ new tab
 ros2 run a5_bimanual_arm bimanual_arm_controller --ros-args \
   -p mode:=collect \
   -p datasets_dir:=/home/arx/WBCD/A5/datasets \
-  -p img_head_topic:=/camera/camera_h/color/image_rect_raw \
-  -p img_left_topic:=/camera/camera_l/color/image_rect_raw \
-  -p img_right_topic:=/camera/camera_r/color/image_rect_raw 
+  -p img_head_topic:=/camera/camera_h/color/image_rect_raw/compressed \
+  -p img_left_topic:=/camera/camera_l/color/image_rect_raw/compressed \
+  -p img_right_topic:=/camera/camera_r/color/image_rect_raw/compressed 
 ```
 等待输出
 ```

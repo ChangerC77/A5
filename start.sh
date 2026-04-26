@@ -5,5 +5,5 @@ cd realsense
 source install/setup.bash
 ./realsense.sh
 cd ..
-gnome-terminal --tab --title="can1" -- $shell_type -c "ARX_CAN/arx_can1; $shell_exec" \
+gnome-terminal --tab --title="can1" -- $shell_type -c "ARX_CAN/arx_can1; $shell_exec" 
 gnome-terminal --tab --title="can3" -- $shell_type -c "ARX_CAN/arx_can3; $shell_exec"

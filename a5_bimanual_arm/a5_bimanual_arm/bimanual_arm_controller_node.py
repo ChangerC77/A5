@@ -5,7 +5,7 @@ from a5_bimanual_arm.bimanual_arm_controller import BimanualArmFSM
 from a5_bimanual_arm.keyboard_handler import KeyboardHandler
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage
 
 
 class BimanualArmControllerNode(Node):
@@ -76,9 +76,9 @@ class BimanualArmControllerNode(Node):
             'qos=sensor_data(best_effort), slop=0.05'
         )
 
-        self.head_realsense_sub = Subscriber(self, Image, img_head_topic, qos_profile=qos_profile_sensor_data)
-        self.left_realsense_sub = Subscriber(self, Image, img_left_topic, qos_profile=qos_profile_sensor_data)
-        self.right_realsense_sub = Subscriber(self, Image, img_right_topic, qos_profile=qos_profile_sensor_data)
+        self.head_realsense_sub = Subscriber(self, CompressedImage, img_head_topic, qos_profile=qos_profile_sensor_data)
+        self.left_realsense_sub = Subscriber(self, CompressedImage, img_left_topic, qos_profile=qos_profile_sensor_data)
+        self.right_realsense_sub = Subscriber(self, CompressedImage, img_right_topic, qos_profile=qos_profile_sensor_data)
 
         self.head_realsense_sub.registerCallback(self._on_head_image)
         self.left_realsense_sub.registerCallback(self._on_left_image)
@@ -91,13 +91,13 @@ class BimanualArmControllerNode(Node):
         )
         self.sync.registerCallback(self.realsense_sync_callback)
 
-    def _on_head_image(self, _msg: Image):
+    def _on_head_image(self, _msg: CompressedImage):
         self._img_recv_count['head'] += 1
 
-    def _on_left_image(self, _msg: Image):
+    def _on_left_image(self, _msg: CompressedImage):
         self._img_recv_count['left'] += 1
 
-    def _on_right_image(self, _msg: Image):
+    def _on_right_image(self, _msg: CompressedImage):
         self._img_recv_count['right'] += 1
 
     def _report_realsense_stats(self):
@@ -114,7 +114,7 @@ class BimanualArmControllerNode(Node):
                 'Check topic names and publisher QoS compatibility.'
             )
 
-    def realsense_sync_callback(self, img_head: Image, img_left: Image, img_right: Image):
+    def realsense_sync_callback(self, img_head: CompressedImage, img_left: CompressedImage, img_right: CompressedImage):
         self._sync_count += 1
         self.get_logger().debug(
             f'Sync callback #{self._sync_count} '

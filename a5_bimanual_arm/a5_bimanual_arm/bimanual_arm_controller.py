@@ -96,7 +96,11 @@ class BimanualArmFSM():
 
     def on_enter_collecting(self, event):
         self.get_logger().info('Data collection started.')
-        self._init_collect()
+        if self._save_thread is not None and self._save_thread.is_alive():
+            self.get_logger().info('Waiting for previous episode save to finish...')
+            self._save_thread.join()
+            self._save_thread = None
+        self._recorder.start_episode()
 
     def on_exit_collecting(self, event):
         self.get_logger().info('Data collection stopped.')
@@ -134,6 +138,8 @@ class BimanualArmFSM():
             t0 = time.perf_counter()
             self._process_events()
             self._process_auto_transitions()
+            if self._save_thread is not None and self._save_thread.is_alive():
+                self.get_logger().info('saving ...')
             try:
 
                 if self.is_collecting():
@@ -174,12 +180,8 @@ class BimanualArmFSM():
 
     # ---- placeholder methods (to be implemented) ----
 
-    def _init_collect(self):
-        if self._save_thread is not None and self._save_thread.is_alive():
-            self.get_logger().info('Waiting for previous episode save to finish...')
-            self._save_thread.join()
-            self._save_thread = None
-        self._recorder.start_episode()
+
+
 
     def _collect_step(self):
         self._gravity_compensation()
@@ -372,9 +374,10 @@ class BimanualArmFSM():
 
         send_idx = next_idx - 1
         action = self._replay_actions[send_idx]
-        half = self._joint_num // 2
-        self.left_arm.set_joint_positions(action[:half])
-        self.right_arm.set_joint_positions(action[half:])
+        self.left_arm.set_joint_positions(action[:6])
+        self.right_arm.set_joint_positions(action[7:14])
+        self.left_arm.set_gripper_pos(action[6])
+        self.right_arm.set_gripper_pos(action[13])
         self._replay_frame_idx = next_idx
 
         if self._replay_frame_idx >= total_frames:
@@ -384,6 +387,8 @@ class BimanualArmFSM():
     # ---- hardware methods ----
 
     def _go_home(self) -> Dict[str, bool]:
+        self.left_arm.set_gripper_pos(-1)
+        self.right_arm.set_gripper_pos(-1)
         return {"left": self.left_arm.go_home(), "right": self.right_arm.go_home()}
 
     def _gravity_compensation(self) -> Dict[str, bool]:

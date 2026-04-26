@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Union
 import cv_bridge
 import h5py
 import numpy as np
-from sensor_msgs.msg import Image as RosImage
+from sensor_msgs.msg import CompressedImage as RosImage
 
 
 _DEFAULT_CONFIG = {
@@ -29,29 +29,7 @@ _BGRA_TO_RGB = np.array([2, 1, 0], dtype=np.intp)
 
 
 def _ros_image_to_rgb(msg: RosImage) -> np.ndarray:
-    encoding = msg.encoding
-    if encoding in ("bgr8", "8UC3"):
-        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        return img[:, :, _BGRA_TO_RGB]
-    elif encoding in ("rgb8", "8UC3") and encoding == "rgb8":
-        return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3).copy()
-    elif encoding == "bgra8":
-        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        return img[:, :, _BGRA_TO_RGB]
-    elif encoding == "rgba8":
-        return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)[:, :, :3].copy()
-    elif encoding == "mono8":
-        img = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
-        return np.stack([img, img, img], axis=-1)
-    elif encoding == "mono16":
-        img = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
-        img8 = (img >> 8).astype(np.uint8)
-        return np.stack([img8, img8, img8], axis=-1)
-    elif encoding in ("yuv422", "UYVY"):
-        img = _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        return img[:, :, _BGRA_TO_RGB]
-    else:
-        return _CV_BRIDGE.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+    return _CV_BRIDGE.compressed_imgmsg_to_cv2(msg, desired_encoding="rgb8")
 
 
 class EpisodeRecorder:
