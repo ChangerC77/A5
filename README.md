@@ -1,8 +1,23 @@
 # ARX A5 数据采集
+分为两部分：
+1. `arx_a5_python`:ARX A5 机械臂 Python 绑定与控制接口，基于 pybind11 封装 C++ 库，具体python api见`arx_a5_python/arx_a5_python/single_arm.py`
+2. `a5_bimanual_arm`ROS2  双臂机械臂控制器包，支持三种运行模式：
+    - `collect`：采集关节状态、动作与三路图像并保存为 HDF5
+    - `infer`：推理占位模式（当前接口保留，逻辑待业务实现）
+    - `replay`：回放 HDF5 轨迹到双臂关节
+
 ## setup env
-
+...
 ## build
+构建分两步：先编译 C++ pybind 模块，再 colcon 构建 ROS2 包。
 
+```bash
+# 1. 编译 C++ pybind 模块（生成 .so 到 arx_a5_python/lib/）
+cd arx_a5_python/cpp && ./build.sh
+
+# 2. colcon 构建 ROS2 包
+cd /home/tony/A5 && colcon build --packages-select arx_a5_python a5_bimanual_arm
+```
 ## 启动采集
 
 new tab
