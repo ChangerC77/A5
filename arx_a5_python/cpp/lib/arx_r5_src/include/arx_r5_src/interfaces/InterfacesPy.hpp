@@ -20,7 +20,7 @@ namespace arx::r5
         void mit_joint_control(int id, double kp, double kd, double pos, double vel, double torque);
 
         /// @brief 获取关节位置
-        /// @return 7维vector
+        /// @return 
         std::vector<double> get_joint_positions();
 
         /// @brief 获取关节速度

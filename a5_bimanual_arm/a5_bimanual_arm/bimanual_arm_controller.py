@@ -127,7 +127,7 @@ class BimanualArmFSM():
     # ---- control loop (180Hz) ----
 
     def _fsm_task(self):
-        period = 1.0 / 30.0
+        period = 1.0 / 90.0
         self.get_logger().info('fsm started at 30hz.')
         self.start_homing()
         while self._ctrl_running:
@@ -185,8 +185,9 @@ class BimanualArmFSM():
         self._gravity_compensation()
         qpos = self.get_joint_positions()
         qvel = self.get_joint_velocities()
+        ee_pose = self.get_ee_pose()
         self._recorder.record_observation(qpos=qpos, qvel=qvel)
-        self._recorder.record_action(qpos)
+        self._recorder.record_action(actions=qpos, actions_eef=ee_pose)
 
     def _stop_collect(self):
         if not self._recorder.is_recording:
@@ -430,6 +431,14 @@ class BimanualArmFSM():
         right = self.right_arm.get_joint_velocities()
         result[:half] = left[:half]
         result[half:] = right[:half]
+        return result
+
+    def get_ee_pose(
+            self
+        ) -> np.ndarray:
+        left = self.left_arm.get_ee_pose()
+        right = self.right_arm.get_ee_pose()
+        result = np.concatenate([left, right])
         return result
 
     def get_logger(self):

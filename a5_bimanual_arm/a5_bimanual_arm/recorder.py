@@ -19,7 +19,8 @@ _DEFAULT_CONFIG = {
         {"name": "images/left_wrist", "type": "image"},
         {"name": "images/right_wrist", "type": "image"},
     ],
-    "action_key": {"name": "actions", "type": "float", "shape": [14]},
+    "action_key": [ {"name": "actions", "type": "float", "shape": [14]},
+                    {"name": "actions_eef", "type": "float", "shape": [14]}],
 }
 
 _CV_BRIDGE = cv_bridge.CvBridge()
@@ -74,7 +75,11 @@ class EpisodeRecorder:
         self._joint_buffer_maxlen = joint_buffer_maxlen
 
         self._obs_keys = self._config["obs_keys"]
-        self._action_key = self._config.get("action_key", None)
+        self._action_keys = self._config.get("action_key", None)
+        if self._action_keys is None:
+            self._action_keys = []
+        elif isinstance(self._action_keys, dict):
+            self._action_keys = [self._action_keys]
 
         self._float_obs_keys = [k for k in self._obs_keys if k["type"] == "float"]
         self._image_obs_keys = [k for k in self._obs_keys if k["type"] == "image"]
@@ -88,7 +93,7 @@ class EpisodeRecorder:
         self._joint_ts: deque = deque(maxlen=joint_buffer_maxlen)
         self._joint_data: Dict[str, deque] = {}
         self._action_ts: deque = deque(maxlen=joint_buffer_maxlen)
-        self._action_data: deque = deque(maxlen=joint_buffer_maxlen)
+        self._action_data: Dict[str, deque] = {}
         self._image_ts: Dict[str, deque] = {}
         self._image_data: Dict[str, deque] = {}
         self._latest_image_time: Dict[str, float] = {}
@@ -120,8 +125,8 @@ class EpisodeRecorder:
                 self._current_episode[f"observations/{k}"] = []
             for k in self._image_key_names:
                 self._current_episode[f"observations/{k}"] = []
-            if self._action_key is not None:
-                self._current_episode[self._action_key["name"]] = []
+            for action_key in self._action_keys:
+                self._current_episode[action_key["name"]] = []
 
     def record_observation(self, **kwargs: np.ndarray) -> None:
         with self._lock:
@@ -135,13 +140,20 @@ class EpisodeRecorder:
                 self._joint_ts.append(t)
                 self._joint_data[name].append(np.asarray(kwargs[name], dtype=np.float64).copy())
 
-    def record_action(self, action: np.ndarray) -> None:
+    def record_action(self, **kwargs: np.ndarray) -> None:
         with self._lock:
-            if not self._recording or self._action_key is None:
+            if not self._recording or not self._action_keys:
                 return
+            if not self._action_data:
+                self._action_data = {k["name"]: deque(maxlen=self._joint_buffer_maxlen) for k in self._action_keys}
             t = time.perf_counter()
-            self._action_ts.append(t)
-            self._action_data.append(np.asarray(action, dtype=np.float64).copy())
+            for action_key in self._action_keys:
+                name = action_key["name"]
+                if name not in kwargs:
+                    self._logger.warning(f'Missing action key: {name}')
+                    continue
+                self._action_ts.append(t)
+                self._action_data[name].append(np.asarray(kwargs[name], dtype=np.float64).copy())
 
     def record_image(self, key: str, image: Union[RosImage, np.ndarray]) -> None:
         if key not in self._image_key_names:
@@ -225,12 +237,17 @@ class EpisodeRecorder:
                     self._current_episode[f"observations/{key_name}"].pop()
             return
 
-        if self._action_key is not None and len(self._action_ts) >= 2:
-            interpolated = self._interpolate_joint(t_ref, self._action_ts, self._action_data)
-            if interpolated is not None:
-                self._current_episode[self._action_key["name"]].append(interpolated)
-        elif self._action_key is not None and len(self._action_ts) == 1:
-            self._current_episode[self._action_key["name"]].append(self._action_data[0].copy())
+        if self._action_keys:
+            for action_key in self._action_keys:
+                name = action_key["name"]
+                if name not in self._action_data or len(self._action_data[name]) == 0:
+                    continue
+                if len(self._action_data[name]) >= 2:
+                    interpolated = self._interpolate_joint(t_ref, self._action_ts, self._action_data[name])
+                    if interpolated is not None:
+                        self._current_episode[name].append(interpolated)
+                elif len(self._action_data[name]) == 1:
+                    self._current_episode[name].append(self._action_data[name][0].copy())
 
         self._sync_successes += 1
         self._logger.info(f"episode_frames={len(self._current_episode['timestamp'])}")
